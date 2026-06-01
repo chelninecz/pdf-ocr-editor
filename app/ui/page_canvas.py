@@ -80,13 +80,6 @@ class PageCanvas(QGraphicsView):
         for item in self._items.values():
             item.refresh_style()
 
-    def remove_line(self, line: TextLine) -> None:
-        item = self._items.pop(id(line), None)
-        if item is not None:
-            self._scene.removeItem(item)
-        if self._page and line in self._page.lines:
-            self._page.lines.remove(line)
-
     def select_line(self, line: Optional[TextLine]) -> None:
         self._scene.blockSignals(True)
         for item in self._items.values():

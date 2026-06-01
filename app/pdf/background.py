@@ -81,23 +81,3 @@ def classify_lines(raster: np.ndarray, lines: List[TextLine]) -> None:
         ln.bg_color = bg_color
         ln.color = text_color
         ln.erasable = is_white
-
-
-def build_clean_plate(raster: np.ndarray, lines: List[TextLine]) -> np.ndarray:
-    """Copy the raster and white-out every enabled, erasable line's box.
-
-    Coloured-background lines are left exactly as-is so the part drawing keeps its
-    appearance. A 1-px pad swallows anti-aliasing fringe around the glyphs.
-    """
-    plate = raster.copy()
-    h, w = plate.shape[:2]
-    for ln in lines:
-        if not (ln.enabled and ln.erasable):
-            continue
-        x0, y0, x1, y1 = _clamp_bbox(ln.bbox, w, h)
-        x0 = max(0, x0 - 1)
-        y0 = max(0, y0 - 1)
-        x1 = min(w, x1 + 1)
-        y1 = min(h, y1 + 1)
-        plate[y0:y1, x0:x1] = np.array(ln.bg_color, dtype=np.uint8)
-    return plate

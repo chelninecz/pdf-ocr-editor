@@ -30,10 +30,11 @@ from PySide6.QtWidgets import (
 from ..model.document import Document, Page, TextLine
 from ..model.project import load_session, save_session, session_path_for
 from ..ocr.rapidocr_engine import REC_LANGS
-from ..pdf.rebuilder import rebuild_document
+from ..pdf.rebuilder import change_kind, rebuild_document, render_preview
 from ..pdf.renderer import DEFAULT_DPI, render_document
 from .ocr_worker import OcrWorker
 from .page_canvas import PageCanvas
+from .preview_dialog import PreviewDialog
 from .text_box_item import LOW_CONF
 
 
@@ -48,6 +49,7 @@ class MainWindow(QMainWindow):
         self.dpi = DEFAULT_DPI
         self.lang = "ch"
         self._worker: Optional[OcrWorker] = None
+        self._preview: Optional[PreviewDialog] = None
         self._syncing = False
 
         # Undo/redo: stacks of (page_index, deep-copied line list) snapshots.
@@ -92,11 +94,13 @@ class MainWindow(QMainWindow):
         self.text_edit.textChanged.connect(self._on_text_changed)
         self.info_label = QLabel("—")
         self.info_label.setWordWrap(True)
-        self.cb_erasable = QCheckBox("Erasable (white background)")
+        self.cb_erasable = QCheckBox("White background (clean erase)")
+        self.cb_erasable.setToolTip("If set, the old word is covered with white; "
+                                    "otherwise with the sampled background colour.")
         self.cb_erasable.toggled.connect(self._on_erasable_toggled)
-        self.cb_enabled = QCheckBox("Include in output")
+        self.cb_enabled = QCheckBox("Keep word in output (uncheck = erase)")
         self.cb_enabled.toggled.connect(self._on_enabled_toggled)
-        self.btn_delete = QPushButton("Delete line")
+        self.btn_delete = QPushButton("Delete word (erase from drawing)")
         self.btn_delete.clicked.connect(self._delete_current_line)
 
         panel = QWidget()
@@ -134,6 +138,7 @@ class MainWindow(QMainWindow):
         self.act_redo = self._act("Redo", self.redo, "Ctrl+Y")
         self.act_redo.setShortcuts([QKeySequence("Ctrl+Y"), QKeySequence("Ctrl+Shift+Z")])
         self.act_add = self._act("Add box", lambda: self.canvas.set_add_mode(True), "Ctrl+B")
+        self.act_preview = self._act("Preview", self.show_preview, "Ctrl+P")
         self.act_export = self._act("Export PDF", self.export_pdf, "Ctrl+E")
         self.act_save = self._act("Save session", self.save_session, "Ctrl+S")
         self.act_load = self._act("Open session", self.open_session, None)
@@ -144,6 +149,7 @@ class MainWindow(QMainWindow):
         tb.addAction(self.act_redo)
         tb.addSeparator()
         tb.addAction(self.act_add)
+        tb.addAction(self.act_preview)
         tb.addAction(self.act_export)
         tb.addSeparator()
         tb.addAction(self.act_save)
@@ -184,7 +190,7 @@ class MainWindow(QMainWindow):
     def _update_actions_enabled(self) -> None:
         has_doc = self.doc is not None
         busy = self._worker is not None and self._worker.isRunning()
-        for a in (self.act_ocr, self.act_add, self.act_export, self.act_save):
+        for a in (self.act_ocr, self.act_add, self.act_preview, self.act_export, self.act_save):
             a.setEnabled(has_doc and not busy)
         self.act_open.setEnabled(not busy)
         self.act_load.setEnabled(not busy)
@@ -305,6 +311,34 @@ class MainWindow(QMainWindow):
         self._update_actions_enabled()
         QMessageBox.critical(self, "OCR failed", msg)
 
+    def show_preview(self) -> None:
+        if self.doc is None:
+            return
+        if self._preview is None:
+            self._preview = PreviewDialog(self)
+            self._preview.btn_refresh.clicked.connect(self._refresh_preview)
+        self._preview.show()
+        self._preview.raise_()
+        self._preview.activateWindow()
+        self._refresh_preview()
+
+    def _refresh_preview(self) -> None:
+        if self._preview is None or self.doc is None or self.current_page is None:
+            return
+        try:
+            self.setCursor(Qt.CursorShape.WaitCursor)
+            png = render_preview(self.doc, self.page_index, dpi=150)
+        except Exception as exc:
+            self._preview.set_message(f"Preview failed:\n{exc}")
+            return
+        finally:
+            self.unsetCursor()
+        changed = sum(1 for ln in self.current_page.lines if change_kind(ln) != "none")
+        self._preview.set_image(
+            png, f"Page {self.page_index + 1} — {changed} change(s) patched; "
+                 f"everything else is the original."
+        )
+
     def export_pdf(self) -> None:
         if self.doc is None:
             return
@@ -372,6 +406,8 @@ class MainWindow(QMainWindow):
         self.canvas.set_page(self.current_page)
         self._rebuild_line_table()
         self._load_editor(None)
+        if self._preview is not None and self._preview.isVisible():
+            self._refresh_preview()
 
     def _rebuild_line_table(self) -> None:
         self._syncing = True
@@ -386,7 +422,7 @@ class MainWindow(QMainWindow):
     def _fill_table_row(self, r: int, ln: TextLine) -> None:
         conf = QTableWidgetItem(f"{ln.score:.2f}")
         kind = QTableWidgetItem(
-            "off" if not ln.enabled else ("white" if ln.erasable else "color")
+            "erase" if not ln.enabled else ("white" if ln.erasable else "color")
         )
         text = QTableWidgetItem(ln.edited_text)
         conf.setData(Qt.ItemDataRole.UserRole, ln)
@@ -500,11 +536,12 @@ class MainWindow(QMainWindow):
             self._syncing = False
 
     def _delete_current_line(self) -> None:
+        """Mark the word as deleted: it stays in the model (so its region can be
+        erased on export and the action can be undone), but is excluded/erased."""
         line = getattr(self, "_current_line", None)
         if line is None:
             return
-        self._record_undo()  # snapshot before removal so it can be brought back
-        self.canvas.remove_line(line)
-        self._rebuild_line_table()
-        self._load_editor(None)
-        self._update_page_count(self.page_index)
+        self._record_undo()  # snapshot so an accidental delete is one Ctrl+Z away
+        line.enabled = False
+        self._refresh_current_line_style()
+        self._load_editor(line)  # refresh the panel (checkbox now unchecked)
