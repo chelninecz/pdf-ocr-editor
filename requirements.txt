@@ -1,0 +1,11 @@
+# Runtime dependencies (CPU-only, fully offline, no admin install needed).
+# Install into a per-user venv:  python -m venv .venv && .venv\Scripts\pip install -r requirements.txt
+PyMuPDF>=1.24
+numpy>=1.26
+Pillow>=10
+rapidocr-onnxruntime>=1.2   # PP-OCR detection/recognition models bundled (ONNXRuntime)
+onnxruntime>=1.17
+PySide6>=6.6                # ships abi3 wheels (work on Python 3.10–3.14)
+
+# Build-only (not needed at runtime):
+# pyinstaller>=6.0

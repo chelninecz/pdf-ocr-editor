@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# PyInstaller build output (incl. the built .exe bundle)
+dist/
+build/_work/
+*.manifest
+
+# Downloaded OCR models (large; fetch with scripts/fetch_models.py)
+app/ocr/models/
+
+# Generated / customer-derived test artifacts
+scripts/*.pdf
+scripts/*.png
+scripts/*.ocr-session.json
+selftest*.txt
+
+# Session files produced next to PDFs
+*.ocr-session.json
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Claude Code / harness session state
+.claude/
