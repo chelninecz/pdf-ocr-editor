@@ -28,7 +28,7 @@ from ..model.document import Document, Page, TextLine
 # coverage, embedded automatically. Set CJK_FONT_FILE to a Noto Sans CJK .otf for
 # nicer glyphs without other changes.
 CJK_FONT_NAME = "china-s"
-CJK_FONT_FILE: Optional[str] = None
+CJK_FONT_FILE: Optional[str] = os.path.join(os.path.dirname(__file__), "..", "fonts", "NotoSansCJKsc-Regular.otf")
 
 # How far (in points) to grow each cover rectangle so it swallows anti-aliasing
 # fringe around the original glyphs.
